@@ -1,19 +1,25 @@
+import os
 import requests
 import time
 import csv
 import gspread
 from google.oauth2.service_account import Credentials
 from io import StringIO
+import json
 
 # === CONFIG ===
-DUNE_API_KEY = "H6OJorFqIQ3u1feaIT8O3vekFN3aFxuZ"
+DUNE_API_KEY = os.environ.get("DUNE_API_KEY")  # read from GitHub secret
 QUERY_ID = "6666216"
 
 GOOGLE_SHEET_NAME = "Pump Pnl"
 INPUT_SHEET_NAME = "Internal_wallet"
 OUTPUT_SHEET_NAME = "Data"
 
-GOOGLE_CREDS_FILE = "gsheet_credentials.json"
+# Google credentials JSON from GitHub secret
+GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
+if not GOOGLE_CREDS_JSON:
+    raise Exception("GOOGLE_CREDS_JSON not set in environment")
+GOOGLE_CREDS_DICT = json.loads(GOOGLE_CREDS_JSON)
 
 # === AUTH HEADERS ===
 headers = {
@@ -27,7 +33,7 @@ def get_gsheet_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_file(GOOGLE_CREDS_FILE, scopes=scopes)
+    creds = Credentials.from_service_account_info(GOOGLE_CREDS_DICT, scopes=scopes)
     client = gspread.authorize(creds)
     return client
 
@@ -72,18 +78,19 @@ def wait_for_csv(execution_id):
     csv_url = f"https://api.dune.com/api/v1/execution/{execution_id}/results/csv"
 
     while True:
-        response = requests.get(csv_url, headers=headers)
-
-        if response.status_code == 200 and response.text.strip():
-            print("✅ Query finished!")
-            return response.text
-
-        elif response.status_code in [202, 409]:
-            print("⏳ Still running... wait 30s")
-            time.sleep(30)
-
-        else:
-            response.raise_for_status()
+        try:
+            response = requests.get(csv_url, headers=headers)
+            if response.status_code == 200 and response.text.strip():
+                print("✅ Query finished!")
+                return response.text
+            elif response.status_code in [202, 409]:
+                print("⏳ Still running... wait 30s")
+                time.sleep(30)
+            else:
+                response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"⚠ Network error: {e}, retrying in 10s...")
+            time.sleep(10)
 
 # === 5. WRITE TO GOOGLE SHEET (CLEAR FIRST + NUMBERS) ===
 def write_to_gsheet(client, csv_text):
@@ -108,8 +115,7 @@ def write_to_gsheet(client, csv_text):
     processed_data = []
     for i, row in enumerate(data):
         if i == 0:
-            # header
-            processed_data.append(row)
+            processed_data.append(row)  # header
             continue
         new_row = [row[0]]  # first column = wallet (string)
         for cell in row[1:]:
@@ -123,10 +129,7 @@ def write_to_gsheet(client, csv_text):
     BATCH_SIZE = 500
     for i in range(0, len(processed_data), BATCH_SIZE):
         batch = processed_data[i:i + BATCH_SIZE]
-        start_row = i + 1
-        end_row = i + len(batch)
-        range_name = f"A{start_row}"
-        print(f"Writing rows {start_row} to {end_row}...")
+        range_name = f"A{i+1}"
         sheet.update(range_name, batch)
         time.sleep(1)  # avoid rate limit
 
@@ -135,13 +138,9 @@ def write_to_gsheet(client, csv_text):
 # === MAIN ===
 def main():
     client = get_gsheet_client()
-
     wallets, token_address = read_parameters(client)
-
     execution_id = run_dune_query(wallets, token_address)
-
     csv_text = wait_for_csv(execution_id)
-
     write_to_gsheet(client, csv_text)
 
 # === RUN ===
