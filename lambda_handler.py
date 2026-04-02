@@ -2,8 +2,6 @@ import json
 import os
 import dune_result
 
-CREDS_FILE = os.path.join(os.path.dirname(__file__), "gsheet_credentials.json")
-
 
 def lambda_handler(event, context):
     # Parse POST body
@@ -23,14 +21,19 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Missing required field: dune_api_key"})
         }
 
-    # Load Google credentials from bundled JSON file
-    try:
-        with open(CREDS_FILE) as f:
-            google_creds_dict = json.load(f)
-    except FileNotFoundError:
+    # Load Google credentials from Lambda environment variable
+    google_creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+    if not google_creds_json:
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": "gsheet_credentials.json not found in deployment package"})
+            "body": json.dumps({"error": "GOOGLE_CREDS_JSON not set in Lambda environment"})
+        }
+    try:
+        google_creds_dict = json.loads(google_creds_json)
+    except json.JSONDecodeError:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": "GOOGLE_CREDS_JSON is not valid JSON"})
         }
 
     # Run the pipeline
