@@ -47,17 +47,25 @@ def run_dune_query(wallets, token_address, dune_api_key):
         "X-DUNE-API-KEY": dune_api_key,
         "Content-Type": "application/json"
     }
-    query_parameters = {
-        "wallets": wallets,
-        "token_address": token_address
+
+    wallets_str = ",".join(f"'{w.strip()}'" for w in wallets if w.strip())
+    token_address = token_address.strip()
+
+    print(f"--- Dune Params Debug ---")
+    print(f"token_address: {token_address}")
+    print(f"wallets_str:   {wallets_str}")
+    print(f"-------------------------")
+
+    payload = {
+        "query_parameters": {        # ← correct Dune v1 key
+            "wallets": wallets_str,
+            "token_address": token_address
+        }
     }
 
     execute_url = f"https://api.dune.com/api/v1/query/{QUERY_ID}/execute"
-    response = requests.post(
-        execute_url,
-        headers=headers,
-        json={"parameters": query_parameters}
-    )
+    response = requests.post(execute_url, headers=headers, json=payload)
+    print(f"Execute response: {response.status_code} {response.text}")
     response.raise_for_status()
 
     execution_id = response.json().get("execution_id")
