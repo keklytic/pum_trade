@@ -8,32 +8,20 @@ from io import StringIO
 import json
 
 # === CONFIG ===
-DUNE_API_KEY = os.environ.get("DUNE_API_KEY")  # read from GitHub secret
 QUERY_ID = "6666216"
 
 GOOGLE_SHEET_NAME = "Pump Pnl"
 INPUT_SHEET_NAME = "Internal_wallet"
 OUTPUT_SHEET_NAME = "Data"
 
-# Google credentials JSON from GitHub secret
-GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
-if not GOOGLE_CREDS_JSON:
-    raise Exception("GOOGLE_CREDS_JSON not set in environment")
-GOOGLE_CREDS_DICT = json.loads(GOOGLE_CREDS_JSON)
-
-# === AUTH HEADERS ===
-headers = {
-    "X-DUNE-API-KEY": DUNE_API_KEY,
-    "Content-Type": "application/json"
-}
 
 # === 1. CONNECT TO GOOGLE SHEETS ===
-def get_gsheet_client():
+def get_gsheet_client(google_creds_dict):
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_info(GOOGLE_CREDS_DICT, scopes=scopes)
+    creds = Credentials.from_service_account_info(google_creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
     return client
 
@@ -54,18 +42,30 @@ def read_parameters(client):
     return wallets, token_address
 
 # === 3. EXECUTE DUNE QUERY ===
-def run_dune_query(wallets, token_address):
-    query_parameters = {
-        "wallets": wallets,
-        "token_address": token_address
+def run_dune_query(wallets, token_address, dune_api_key):
+    headers = {
+        "X-DUNE-API-KEY": dune_api_key,
+        "Content-Type": "application/json"
+    }
+
+    wallets_str = ",".join(f"'{w.strip()}'" for w in wallets if w.strip())
+    token_address = token_address.strip()
+
+    print(f"--- Dune Params Debug ---")
+    print(f"token_address: {token_address}")
+    print(f"wallets_str:   {wallets_str}")
+    print(f"-------------------------")
+
+    payload = {
+        "query_parameters": {        # ← correct Dune v1 key
+            "wallets": wallets_str,
+            "token_address": token_address
+        }
     }
 
     execute_url = f"https://api.dune.com/api/v1/query/{QUERY_ID}/execute"
-    response = requests.post(
-        execute_url,
-        headers=headers,
-        json={"parameters": query_parameters}
-    )
+    response = requests.post(execute_url, headers=headers, json=payload)
+    print(f"Execute response: {response.status_code} {response.text}")
     response.raise_for_status()
 
     execution_id = response.json().get("execution_id")
@@ -74,10 +74,19 @@ def run_dune_query(wallets, token_address):
     return execution_id
 
 # === 4. WAIT FOR CSV RESULT ===
-def wait_for_csv(execution_id):
+def wait_for_csv(execution_id, dune_api_key):
+    headers = {
+        "X-DUNE-API-KEY": dune_api_key,
+        "Content-Type": "application/json"
+    }
     csv_url = f"https://api.dune.com/api/v1/execution/{execution_id}/results/csv"
+    start_time = time.time()
+    max_wait = 12 * 60  # 12 minutes — stay within Lambda 15-min timeout
 
     while True:
+        elapsed = time.time() - start_time
+        if elapsed > max_wait:
+            raise TimeoutError(f"Dune query did not complete within {max_wait // 60} minutes")
         try:
             response = requests.get(csv_url, headers=headers)
             if response.status_code == 200 and response.text.strip():
@@ -136,13 +145,15 @@ def write_to_gsheet(client, csv_text):
     print("✅ Sheet updated with proper numeric values!")
 
 # === MAIN ===
-def main():
-    client = get_gsheet_client()
+def main(dune_api_key, google_creds_dict):
+    client = get_gsheet_client(google_creds_dict)
     wallets, token_address = read_parameters(client)
-    execution_id = run_dune_query(wallets, token_address)
-    csv_text = wait_for_csv(execution_id)
+    execution_id = run_dune_query(wallets, token_address, dune_api_key)
+    csv_text = wait_for_csv(execution_id, dune_api_key)
     write_to_gsheet(client, csv_text)
 
-# === RUN ===
+# === RUN (local) ===
 if __name__ == "__main__":
-    main()
+    _key = os.environ["DUNE_API_KEY"]
+    _creds = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+    main(_key, _creds)
