@@ -4,24 +4,17 @@ import dune_result
 
 
 def lambda_handler(event, context):
-    # Parse POST body
-    try:
-        body = json.loads(event.get("body") or "{}")
-    except json.JSONDecodeError:
+    # Worker reads inputs (wallets + CA) from the Internal_wallet sheet,
+    # which the dispatcher populated before invoking us. This avoids the
+    # 256KB async-invoke payload limit when the wallets list is large.
+
+    # Validate required env vars
+    if not os.environ.get("DUNE_API_KEY"):
         return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Invalid JSON in request body"})
+            "statusCode": 500,
+            "body": json.dumps({"error": "DUNE_API_KEY not set in Lambda environment"})
         }
 
-    # Extract dune_api_key from POST body
-    dune_api_key = body.get("dune_api_key")
-    if not dune_api_key:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Missing required field: dune_api_key"})
-        }
-
-    # Load Google credentials from Lambda environment variable
     google_creds_json = os.environ.get("GOOGLE_CREDS_JSON")
     if not google_creds_json:
         return {
@@ -38,7 +31,7 @@ def lambda_handler(event, context):
 
     # Run the pipeline
     try:
-        dune_result.main(dune_api_key, google_creds_dict)
+        dune_result.main(google_creds_dict)
     except TimeoutError as e:
         return {
             "statusCode": 504,

@@ -25,18 +25,46 @@ def get_gsheet_client(google_creds_dict):
     client = gspread.authorize(creds)
     return client
 
-# === 2. READ PARAMETERS FROM GSHEET ===
+# === 2a. WRITE PARAMETERS TO GSHEET (called by dispatcher) ===
+def write_parameters(client, wallets, token_address):
+    spreadsheet = client.open(GOOGLE_SHEET_NAME)
+
+    try:
+        sheet = spreadsheet.worksheet(INPUT_SHEET_NAME)
+    except gspread.exceptions.WorksheetNotFound:
+        print(f"Sheet '{INPUT_SHEET_NAME}' not found. Creating it...")
+        rows_needed = max(1000, len(wallets) + 10)
+        sheet = spreadsheet.add_worksheet(title=INPUT_SHEET_NAME, rows=str(rows_needed), cols="2")
+
+    sheet.clear()
+
+    rows = [["wallet", "token_address"]]
+    for i, wallet in enumerate(wallets):
+        rows.append([wallet, token_address if i == 0 else ""])
+
+    # Batch write to avoid large payload errors when wallets list is huge
+    BATCH_SIZE = 1000
+    for i in range(0, len(rows), BATCH_SIZE):
+        batch = rows[i:i + BATCH_SIZE]
+        range_name = f"A{i+1}"
+        sheet.update(range_name, batch)
+        time.sleep(1)  # avoid rate limit
+
+    print(f"✅ Wrote {len(wallets)} wallets and CA to '{INPUT_SHEET_NAME}'")
+
+# === 2b. READ PARAMETERS FROM GSHEET (called by worker) ===
 def read_parameters(client):
     sheet = client.open(GOOGLE_SHEET_NAME).worksheet(INPUT_SHEET_NAME)
     data = sheet.get_all_values()
 
     wallets = []
     for row in data[1:]:  # skip header
-        wallets.extend(row[0].split())
+        if row and row[0].strip():
+            wallets.extend(row[0].split())
 
-    token_address = data[1][1]
+    token_address = data[1][1] if len(data) > 1 and len(data[1]) > 1 else ""
 
-    print(f"Wallets: {wallets}")
+    print(f"Wallets count: {len(wallets)}")
     print(f"Token Address: {token_address}")
 
     return wallets, token_address
@@ -144,8 +172,9 @@ def write_to_gsheet(client, csv_text):
 
     print("✅ Sheet updated with proper numeric values!")
 
-# === MAIN ===
-def main(dune_api_key, google_creds_dict):
+# === MAIN (worker pipeline: reads input sheet, runs Dune, writes output sheet) ===
+def main(google_creds_dict):
+    dune_api_key = os.environ["DUNE_API_KEY"]
     client = get_gsheet_client(google_creds_dict)
     wallets, token_address = read_parameters(client)
     execution_id = run_dune_query(wallets, token_address, dune_api_key)
@@ -154,6 +183,5 @@ def main(dune_api_key, google_creds_dict):
 
 # === RUN (local) ===
 if __name__ == "__main__":
-    _key = os.environ["DUNE_API_KEY"]
     _creds = json.loads(os.environ["GOOGLE_CREDS_JSON"])
-    main(_key, _creds)
+    main(_creds)
