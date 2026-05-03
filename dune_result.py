@@ -59,12 +59,11 @@ def read_parameters(client):
 
     wallets = []
     for row in data[1:]:  # skip header
-        if row and row[0].strip():
-            wallets.extend(row[0].split())
+        wallets.extend(row[0].split())
 
-    token_address = data[1][1] if len(data) > 1 and len(data[1]) > 1 else ""
+    token_address = data[1][1]
 
-    print(f"Wallets count: {len(wallets)}")
+    print(f"Wallets: {wallets}")
     print(f"Token Address: {token_address}")
 
     return wallets, token_address
