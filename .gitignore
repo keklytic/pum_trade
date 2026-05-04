@@ -1,2 +1,6 @@
 .env
 gsheet_credentials.json
+lambda_package/
+dispatcher_package/
+dispatcher.zip
+lambda_deployment.zip

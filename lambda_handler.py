@@ -1,15 +1,40 @@
 import json
 import os
 import dune_result
+from logger import get_logger
+
+log = get_logger(__name__)
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Api-Key",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "Content-Type": "application/json"
+}
 
 
 def lambda_handler(event, context):
-    # Worker reads inputs (wallets + CA) from the Internal_wallet sheet,
-    # which the dispatcher populated before invoking us. This avoids the
-    # 256KB async-invoke payload limit when the wallets list is large.
+    # Parse event body (forwarded by dispatcher)
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Invalid JSON in request body"})
+        }
 
-    # Validate required env vars
-    if not os.environ.get("DUNE_API_KEY"):
+    ca = body.get("ca")
+    wallets = body.get("wallets")
+
+    if not ca or not wallets:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Missing required fields: ca, wallets"})
+        }
+
+    # Load env vars
+    dune_api_key = os.environ.get("DUNE_API_KEY")
+    if not dune_api_key:
         return {
             "statusCode": 500,
             "body": json.dumps({"error": "DUNE_API_KEY not set in Lambda environment"})
@@ -30,21 +55,28 @@ def lambda_handler(event, context):
         }
 
     # Run the pipeline
+    log.info(f"Worker started: ca={ca} wallets_count={len(wallets)}")
     try:
-        dune_result.main(google_creds_dict)
+        client = dune_result.get_gsheet_client(google_creds_dict)
+        dune_result.write_parameters(client, wallets, ca)
+        dune_result.main(google_creds_dict, dune_api_key)
     except TimeoutError as e:
+        log.error(f"Dune query timed out: {e}")
         return {
             "statusCode": 504,
             "body": json.dumps({"error": str(e)})
         }
     except Exception as e:
+        log.error(f"Worker pipeline failed: {e}", exc_info=True)
         return {
             "statusCode": 500,
             "body": json.dumps({"error": str(e)})
         }
 
+    log.info("Worker pipeline completed successfully")
     return {
         "statusCode": 200,
+        "headers": CORS_HEADERS,
         "body": json.dumps({
             "status": "success",
             "message": "Dune query completed and Google Sheet updated",
