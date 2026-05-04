@@ -114,9 +114,9 @@ docker run --rm \
   -v "$(pwd):/var/task" \
   -w /var/task \
   public.ecr.aws/lambda/python:3.11 \
-  -c "pip install python-logging-loki -t /var/task/dispatcher_package/"
+  -c "pip install -r /var/task/requirements.txt -t /var/task/dispatcher_package/"
 
-cp lambda_dispatcher.py logger.py dispatcher_package/
+cp lambda_dispatcher.py dune_result.py logger.py dispatcher_package/
 cd dispatcher_package && zip -r ../dispatcher.zip . && cd ..
 ```
 
