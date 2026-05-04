@@ -6,6 +6,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 from io import StringIO
 import json
+from logger import get_logger
+
+log = get_logger(__name__)
 
 # === CONFIG ===
 QUERY_ID = "6666216"
@@ -32,7 +35,7 @@ def write_parameters(client, wallets, token_address):
     try:
         sheet = spreadsheet.worksheet(INPUT_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        print(f"Sheet '{INPUT_SHEET_NAME}' not found. Creating it...")
+        log.warning(f"Sheet '{INPUT_SHEET_NAME}' not found. Creating it...")
         rows_needed = max(1000, len(wallets) + 10)
         sheet = spreadsheet.add_worksheet(title=INPUT_SHEET_NAME, rows=str(rows_needed), cols="2")
 
@@ -50,7 +53,7 @@ def write_parameters(client, wallets, token_address):
         sheet.update(range_name, batch)
         time.sleep(1)  # avoid rate limit
 
-    print(f"✅ Wrote {len(wallets)} wallets and CA to '{INPUT_SHEET_NAME}'")
+    log.info(f"Wrote {len(wallets)} wallets and CA to '{INPUT_SHEET_NAME}'")
 
 # === 2b. READ PARAMETERS FROM GSHEET (called by worker) ===
 def read_parameters(client):
@@ -63,8 +66,8 @@ def read_parameters(client):
 
     token_address = data[1][1]
 
-    print(f"Wallets: {wallets}")
-    print(f"Token Address: {token_address}")
+    log.info(f"Wallets count: {len(wallets)}")
+    log.info(f"Token address: {token_address}")
 
     return wallets, token_address
 
@@ -78,10 +81,7 @@ def run_dune_query(wallets, token_address, dune_api_key):
     wallets_str = ",".join(f"'{w.strip()}'" for w in wallets if w.strip())
     token_address = token_address.strip()
 
-    print(f"--- Dune Params Debug ---")
-    print(f"token_address: {token_address}")
-    print(f"wallets_str:   {wallets_str}")
-    print(f"-------------------------")
+    log.debug(f"Dune params — token_address={token_address} wallets_str={wallets_str}")
 
     payload = {
         "query_parameters": {        # ← correct Dune v1 key
@@ -92,11 +92,11 @@ def run_dune_query(wallets, token_address, dune_api_key):
 
     execute_url = f"https://api.dune.com/api/v1/query/{QUERY_ID}/execute"
     response = requests.post(execute_url, headers=headers, json=payload)
-    print(f"Execute response: {response.status_code} {response.text}")
+    log.info(f"Dune execute response: status={response.status_code}")
     response.raise_for_status()
 
     execution_id = response.json().get("execution_id")
-    print(f"Execution ID: {execution_id}")
+    log.info(f"Dune execution started: execution_id={execution_id}")
 
     return execution_id
 
@@ -117,15 +117,15 @@ def wait_for_csv(execution_id, dune_api_key):
         try:
             response = requests.get(csv_url, headers=headers)
             if response.status_code == 200 and response.text.strip():
-                print("✅ Query finished!")
+                log.info("Dune query finished")
                 return response.text
             elif response.status_code in [202, 409]:
-                print("⏳ Still running... wait 30s")
+                log.info(f"Dune query still running (elapsed={elapsed:.0f}s), retrying in 30s")
                 time.sleep(30)
             else:
                 response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            print(f"⚠ Network error: {e}, retrying in 10s...")
+            log.warning(f"Network error: {e}, retrying in 10s")
             time.sleep(10)
 
 # === 5. WRITE TO GOOGLE SHEET (CLEAR FIRST + NUMBERS) ===
@@ -135,14 +135,14 @@ def write_to_gsheet(client, csv_text):
     try:
         sheet = spreadsheet.worksheet(OUTPUT_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        print(f"Sheet '{OUTPUT_SHEET_NAME}' not found. Creating it...")
+        log.warning(f"Sheet '{OUTPUT_SHEET_NAME}' not found. Creating it...")
         sheet = spreadsheet.add_worksheet(title=OUTPUT_SHEET_NAME, rows="1000", cols="20")
 
     # Parse CSV
     reader = csv.reader(StringIO(csv_text))
     data = list(reader)
 
-    print(f"Writing {len(data)} rows to Google Sheet...")
+    log.info(f"Writing {len(data)} rows to Google Sheet")
 
     # Clear sheet first
     sheet.clear()
@@ -169,7 +169,7 @@ def write_to_gsheet(client, csv_text):
         sheet.update(range_name, batch)
         time.sleep(1)  # avoid rate limit
 
-    print("✅ Sheet updated with proper numeric values!")
+    log.info("Sheet updated with numeric values")
 
 # === MAIN (worker pipeline: reads input sheet, runs Dune, writes output sheet) ===
 def main(google_creds_dict):

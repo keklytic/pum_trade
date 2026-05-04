@@ -1,6 +1,9 @@
 import json
 import os
 import dune_result
+from logger import get_logger
+
+log = get_logger(__name__)
 
 
 def lambda_handler(event, context):
@@ -30,19 +33,23 @@ def lambda_handler(event, context):
         }
 
     # Run the pipeline
+    log.info("Worker started")
     try:
         dune_result.main(google_creds_dict)
     except TimeoutError as e:
+        log.error(f"Dune query timed out: {e}")
         return {
             "statusCode": 504,
             "body": json.dumps({"error": str(e)})
         }
     except Exception as e:
+        log.error(f"Worker pipeline failed: {e}", exc_info=True)
         return {
             "statusCode": 500,
             "body": json.dumps({"error": str(e)})
         }
 
+    log.info("Worker pipeline completed successfully")
     return {
         "statusCode": 200,
         "body": json.dumps({

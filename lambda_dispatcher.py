@@ -2,6 +2,9 @@ import json
 import os
 import boto3
 import dune_result
+from logger import get_logger
+
+log = get_logger(__name__)
 
 WORKER_FUNCTION_NAME = os.environ.get("WORKER_FUNCTION_NAME", "pum-trade-dune")
 
@@ -51,10 +54,12 @@ def lambda_handler(event, context):
     # This avoids the 256KB Lambda async-invoke payload limit when the
     # wallets list is large — the worker re-reads the sheet instead of
     # receiving the wallets via its event payload.
+    log.info(f"Dispatching job: ca={ca} wallets_count={len(wallets)} worker={WORKER_FUNCTION_NAME}")
     try:
         client = dune_result.get_gsheet_client(google_creds_dict)
         dune_result.write_parameters(client, wallets, ca)
     except Exception as e:
+        log.error(f"Failed to write parameters to sheet: {e}", exc_info=True)
         return {
             "statusCode": 500,
             "body": json.dumps({"error": f"Failed to write parameters to sheet: {e}"})
@@ -68,6 +73,7 @@ def lambda_handler(event, context):
         Payload=json.dumps({"body": json.dumps({})})
     )
 
+    log.info("Worker invoked successfully")
     return {
         "statusCode": 202,
         "body": json.dumps({
