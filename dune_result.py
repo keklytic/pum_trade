@@ -172,8 +172,7 @@ def write_to_gsheet(client, csv_text):
     log.info("Sheet updated with numeric values")
 
 # === MAIN (worker pipeline: reads input sheet, runs Dune, writes output sheet) ===
-def main(google_creds_dict):
-    dune_api_key = os.environ["DUNE_API_KEY"]
+def main(google_creds_dict, dune_api_key):
     client = get_gsheet_client(google_creds_dict)
     wallets, token_address = read_parameters(client)
     execution_id = run_dune_query(wallets, token_address, dune_api_key)
@@ -183,4 +182,5 @@ def main(google_creds_dict):
 # === RUN (local) ===
 if __name__ == "__main__":
     _creds = json.loads(os.environ["GOOGLE_CREDS_JSON"])
-    main(_creds)
+    _dune_api_key = os.environ["DUNE_API_KEY"]
+    main(_creds, _dune_api_key)
