@@ -56,7 +56,7 @@ Returns `202 Accepted` immediately. Check the "Data" tab in the "Pump Pnl" Googl
 - Runtime: Python 3.11
 - Timeout: 900s (15 min)
 - Memory: 256 MB
-- Env vars: `DUNE_API_KEY`, `GOOGLE_CREDS_JSON`, `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `LOG_LEVEL`, `ENV`
+- Env vars: `DUNE_API_KEY`, `GOOGLE_CREDS_JSON`, `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `LOG_LEVEL`, `ENV`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 
 ### pum-trade-dune-dispatcher
 - Handler: `lambda_dispatcher.lambda_handler`
@@ -96,7 +96,7 @@ docker run --rm \
   public.ecr.aws/lambda/python:3.11 \
   -c "pip install -r requirements.txt -t /var/task/lambda_package/"
 
-cp dune_result.py lambda_handler.py logger.py lambda_package/
+cp dune_result.py lambda_handler.py logger.py telegram_notify.py lambda_package/
 cd lambda_package && zip -r ../lambda_deployment.zip . && cd ..
 ```
 

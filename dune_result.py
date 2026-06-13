@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 from io import StringIO
 import json
 from logger import get_logger
+from telegram_notify import send_telegram_message
 
 log = get_logger(__name__)
 
@@ -129,47 +130,63 @@ def wait_for_csv(execution_id, dune_api_key):
             time.sleep(10)
 
 # === 5. WRITE TO GOOGLE SHEET (CLEAR FIRST + NUMBERS) ===
-def write_to_gsheet(client, csv_text):
-    spreadsheet = client.open(GOOGLE_SHEET_NAME)
-
+def write_to_gsheet(client, csv_text, token_address=None, wallets_count=None):
     try:
-        sheet = spreadsheet.worksheet(OUTPUT_SHEET_NAME)
-    except gspread.exceptions.WorksheetNotFound:
-        log.warning(f"Sheet '{OUTPUT_SHEET_NAME}' not found. Creating it...")
-        sheet = spreadsheet.add_worksheet(title=OUTPUT_SHEET_NAME, rows="1000", cols="20")
+        spreadsheet = client.open(GOOGLE_SHEET_NAME)
 
-    # Parse CSV
-    reader = csv.reader(StringIO(csv_text))
-    data = list(reader)
+        try:
+            sheet = spreadsheet.worksheet(OUTPUT_SHEET_NAME)
+        except gspread.exceptions.WorksheetNotFound:
+            log.warning(f"Sheet '{OUTPUT_SHEET_NAME}' not found. Creating it...")
+            sheet = spreadsheet.add_worksheet(title=OUTPUT_SHEET_NAME, rows="1000", cols="20")
 
-    log.info(f"Writing {len(data)} rows to Google Sheet")
+        # Parse CSV
+        reader = csv.reader(StringIO(csv_text))
+        data = list(reader)
 
-    # Clear sheet first
-    sheet.clear()
+        log.info(f"Writing {len(data)} rows to Google Sheet")
 
-    # Convert numeric strings to floats, keep first column as string
-    processed_data = []
-    for i, row in enumerate(data):
-        if i == 0:
-            processed_data.append(row)  # header
-            continue
-        new_row = [row[0]]  # first column = wallet (string)
-        for cell in row[1:]:
-            try:
-                new_row.append(float(cell))
-            except ValueError:
-                new_row.append(cell)
-        processed_data.append(new_row)
+        # Clear sheet first
+        sheet.clear()
 
-    # Batch write to avoid large payload issues
-    BATCH_SIZE = 500
-    for i in range(0, len(processed_data), BATCH_SIZE):
-        batch = processed_data[i:i + BATCH_SIZE]
-        range_name = f"A{i+1}"
-        sheet.update(range_name, batch)
-        time.sleep(1)  # avoid rate limit
+        # Convert numeric strings to floats, keep first column as string
+        processed_data = []
+        for i, row in enumerate(data):
+            if i == 0:
+                processed_data.append(row)  # header
+                continue
+            new_row = [row[0]]  # first column = wallet (string)
+            for cell in row[1:]:
+                try:
+                    new_row.append(float(cell))
+                except ValueError:
+                    new_row.append(cell)
+            processed_data.append(new_row)
 
-    log.info("Sheet updated with numeric values")
+        # Batch write to avoid large payload issues
+        BATCH_SIZE = 500
+        for i in range(0, len(processed_data), BATCH_SIZE):
+            batch = processed_data[i:i + BATCH_SIZE]
+            range_name = f"A{i+1}"
+            sheet.update(range_name, batch)
+            time.sleep(1)  # avoid rate limit
+
+        log.info("Sheet updated with numeric values")
+    except Exception as e:
+        send_telegram_message(
+            f"❌ <b>pum-trade</b> write failed\n"
+            f"ca: <code>{token_address}</code>\n"
+            f"wallets: {wallets_count}\n"
+            f"error: {e}"
+        )
+        raise
+
+    send_telegram_message(
+        f"✅ <b>pum-trade</b> complete\n"
+        f"ca: <code>{token_address}</code>\n"
+        f"wallets: {wallets_count}\n"
+        f"Results written to '{OUTPUT_SHEET_NAME}' tab."
+    )
 
 # === MAIN (worker pipeline: reads input sheet, runs Dune, writes output sheet) ===
 def main(google_creds_dict, dune_api_key):
@@ -177,7 +194,7 @@ def main(google_creds_dict, dune_api_key):
     wallets, token_address = read_parameters(client)
     execution_id = run_dune_query(wallets, token_address, dune_api_key)
     csv_text = wait_for_csv(execution_id, dune_api_key)
-    write_to_gsheet(client, csv_text)
+    write_to_gsheet(client, csv_text, token_address=token_address, wallets_count=len(wallets))
 
 # === RUN (local) ===
 if __name__ == "__main__":
